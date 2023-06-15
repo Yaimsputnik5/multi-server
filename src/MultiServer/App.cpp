@@ -3,16 +3,33 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <signal.h>
 #include <cstdio>
+#include <cerrno>
 #include <MultiServer/App.h>
+
+static sig_atomic_t sSignaled = 0;
+
+static void sSigHandler(int signum)
+{
+    sSignaled = 1;
+}
 
 App::App()
 : _socket{-1}
 {
+    _epoll = epoll_create1(0);
 }
 
 App::~App()
 {
+    /* Stop epoll */
+    if (_epoll != -1)
+    {
+        close(_epoll);
+        _epoll = -1;
+    }
+
     /* Close the socket */
     if (_socket != -1)
     {
@@ -23,6 +40,7 @@ App::~App()
 
 int App::listen(const char* host, std::uint16_t port)
 {
+    epoll_event event{};
     addrinfo hints{};
     addrinfo* result;
     addrinfo* ptr;
@@ -85,6 +103,17 @@ int App::listen(const char* host, std::uint16_t port)
         return -1;
     }
 
+    /* Add the socket to epoll */
+    event.events = EPOLLIN;
+    event.data.fd = s;
+    ret = epoll_ctl(_epoll, EPOLL_CTL_ADD, s, &event);
+    if (ret == -1)
+    {
+        std::fprintf(stderr, "Could not add socket to epoll\n");
+        close(s);
+        return -1;
+    }
+
     /* Listen on the socket */
     ret = ::listen(s, 5);
     if (ret == -1)
@@ -104,5 +133,37 @@ int App::listen(const char* host, std::uint16_t port)
 
 int App::run()
 {
+    epoll_event events[16];
+    epoll_event* e;
+    int eCount;
+    int ret;
+
+    /* Setup signals */
+    signal(SIGINT, sSigHandler);
+    signal(SIGTERM, sSigHandler);
+
+    printf("Server started\n");
+
+    /* Run the main loop */
+    for (;;)
+    {
+        eCount = epoll_wait(_epoll, events, sizeof(events) / sizeof(events[0]), -1);
+
+        if (eCount == -1)
+        {
+            /* Error handler */
+            if (errno == EINTR)
+            {
+                /* Check if we were signaled */
+                if (sSignaled)
+                    break;
+            }
+            else
+                break;
+        }
+    }
+
+    printf("Closing server\n");
+
     return 0;
 }

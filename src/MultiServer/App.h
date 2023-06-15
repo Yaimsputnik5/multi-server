@@ -2,6 +2,7 @@
 #define APP_H
 
 #include <cstdint>
+#include <sys/epoll.h>
 
 class App
 {
@@ -13,6 +14,7 @@ public:
     int run();
 
 private:
+    int _epoll;
     int _socket;
 };
 
