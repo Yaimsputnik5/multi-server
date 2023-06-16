@@ -1,9 +1,13 @@
+#include <signal.h>
 #include "multi.h"
 
 int main(int argc, char** argv)
 {
     App app;
     int ret;
+
+    /* Ignore SIGPIPE */
+    signal(SIGPIPE, SIG_IGN);
 
     if (multiInit(&app))
         return 1;

@@ -1,13 +1,25 @@
+#include <sys/stat.h>
 #include "multi.h"
 
 int multiInit(App* app)
 {
+    /* Init app */
     app->epoll = epoll_create1(0);
     app->socket = -1;
     app->timer = -1;
+
     app->clientSize = 0;
     app->clientCapacity = 8;
     app->clients = malloc(sizeof(Client) * app->clientCapacity);
+
+    app->ledgerSize = 0;
+    app->ledgerCapacity = 4;
+    app->ledgers = malloc(sizeof(Ledger) * app->ledgerCapacity);
+
+    /* Init dirs */
+    mkdir("data", 0755);
+    mkdir("data/ledgers", 0755);
+
     return 0;
 }
 

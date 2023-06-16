@@ -21,18 +21,44 @@
 
 #define CL_STATE_NEW        0
 #define CL_STATE_CONNECTED  1
+#define CL_STATE_READY      2
+
+#define OP_NONE             0
+#define OP_TRANSFER         1
 
 typedef struct
 {
-    int socket;
-    int state;
-    int timeout;
+    uint64_t key;
+    uint8_t  size;
+}
+LedgerEntryHeader;
+
+typedef struct
+{
+    int         socket;
+    int         state;
+    int         timeout;
+    int         ledgerId;
+    uint32_t    ledgerBase;
 
     uint8_t     op;
     char        inBuf[256];
     uint32_t    inBufSize;
 }
 Client;
+
+typedef struct
+{
+    int     valid;
+    char    uuid[16];
+    int     refCount;
+
+    int         fileData;
+    int         fileIndex;
+    uint32_t    count;
+    uint32_t    size;
+}
+Ledger;
 
 typedef struct
 {
@@ -44,6 +70,11 @@ typedef struct
     uint32_t clientSize;
     uint32_t clientCapacity;
     Client* clients;
+
+    /* Ledgers */
+    uint32_t ledgerSize;
+    uint32_t ledgerCapacity;
+    Ledger* ledgers;
 }
 App;
 
@@ -56,5 +87,8 @@ void multiClientNew(App* app, int s);
 void multiClientDisconnect(App* app, int id);
 void multiClientRemove(App* app, int id);
 void multiClientInput(App* app, int id);
+
+int  multiLedgerOpen(App* app, const char* uuid);
+void multiLedgerWrite(App* app, int ledgerId, const void* data);
 
 #endif
