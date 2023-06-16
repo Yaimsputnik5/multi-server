@@ -187,13 +187,37 @@ int App::run()
 
 void App::acceptClients()
 {
+    Client* c;
+    epoll_event event{};
     int socket;
+    int clientId;
 
     for (;;)
     {
+        /* Accept the socket */
         socket = accept(_socket, nullptr, nullptr);
         if (socket == -1)
             break;
-        printf("NEW CLIENT\n");
+
+        /* Set the socket to non-blocking */
+        fcntl(socket, F_SETFL, O_NONBLOCK);
+
+        /* Assign a client ID */
+        if (_freeListClientIds.empty())
+        {
+            clientId = _clients.size();
+            _clients.emplace_back(clientId, socket);
+        }
+        else
+        {
+            clientId = _freeListClientIds.back();
+            _freeListClientIds.pop_back();
+            _clients[clientId] = Client(clientId, socket);
+        }
+
+        /* Add the socket to epoll */
+        event.events = EPOLLIN;
+        event.data.u32 = APP_EP_SOCK_CLIENT | clientId;
+        epoll_ctl(_epoll, EPOLL_CTL_ADD, socket, &event);
     }
 }

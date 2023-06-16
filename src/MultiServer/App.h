@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <sys/epoll.h>
+#include <vector>
+#include <MultiServer/Client.h>
 
 class App
 {
@@ -15,8 +17,11 @@ public:
 
 private:
     void acceptClients();
-    int _epoll;
-    int _socket;
+
+    int                 _epoll;
+    int                 _socket;
+    std::vector<Client> _clients;
+    std::vector<int>    _freeListClientIds;
 };
 
 #endif
