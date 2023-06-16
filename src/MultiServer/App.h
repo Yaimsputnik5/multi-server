@@ -14,6 +14,7 @@ public:
     int run();
 
 private:
+    void acceptClients();
     int _epoll;
     int _socket;
 };

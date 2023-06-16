@@ -8,6 +8,9 @@
 #include <cerrno>
 #include <MultiServer/App.h>
 
+#define APP_EP_SOCK_SERV     0x00000000
+#define APP_EP_SOCK_CLIENT   0x01000000
+
 static sig_atomic_t sSignaled = 0;
 
 static void sSigHandler(int signum)
@@ -105,7 +108,7 @@ int App::listen(const char* host, std::uint16_t port)
 
     /* Add the socket to epoll */
     event.events = EPOLLIN;
-    event.data.fd = s;
+    event.data.u32 = APP_EP_SOCK_SERV;
     ret = epoll_ctl(_epoll, EPOLL_CTL_ADD, s, &event);
     if (ret == -1)
     {
@@ -161,9 +164,36 @@ int App::run()
             else
                 break;
         }
+
+        /* Handle the events */
+        for (int i = 0; i < eCount; ++i)
+        {
+            e = &events[i];
+
+            switch (e->data.u32 & 0xff000000)
+            {
+            case APP_EP_SOCK_SERV:
+                if (e->events & EPOLLIN)
+                    acceptClients();
+                break;
+            }
+        }
     }
 
     printf("Closing server\n");
 
     return 0;
+}
+
+void App::acceptClients()
+{
+    int socket;
+
+    for (;;)
+    {
+        socket = accept(_socket, nullptr, nullptr);
+        if (socket == -1)
+            break;
+        printf("NEW CLIENT\n");
+    }
 }
