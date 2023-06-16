@@ -4,6 +4,7 @@ int multiInit(App* app)
 {
     app->epoll = epoll_create1(0);
     app->socket = -1;
+    app->timer = -1;
     app->clientSize = 0;
     app->clientCapacity = 8;
     app->clients = malloc(sizeof(Client) * app->clientCapacity);
@@ -63,6 +64,17 @@ int multiListen(App* app, const char* host, uint16_t port)
         if (s == -1)
         {
             perror("socket");
+            continue;
+        }
+
+        /* Set SO_REUSEADDR */
+        ret = 1;
+        ret = setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &ret, sizeof(ret));
+        if (ret == -1)
+        {
+            perror("setsockopt");
+            close(s);
+            s = -1;
             continue;
         }
 

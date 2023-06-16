@@ -30,6 +30,7 @@ void multiClientNew(App* app, int sock)
     client = &app->clients[id];
     client->socket = sock;
     client->state = CL_STATE_NEW;
+    client->timeout = 0;
     client->op = 0;
     client->inBufSize = 0;
 
@@ -42,6 +43,18 @@ void multiClientNew(App* app, int sock)
     printf("Client #%d: Connected\n", id);
 }
 
+void multiClientDisconnect(App* app, int id)
+{
+    printf("Client #%d: Disconnected\n", id);
+    multiClientRemove(app, id);
+}
+
+void multiClientRemove(App* app, int id)
+{
+    close(app->clients[id].socket);
+    app->clients[id].socket = -1;
+}
+
 void clientInputNew(App* app, int id)
 {
     Client* c;
@@ -49,21 +62,24 @@ void clientInputNew(App* app, int id)
 
     c = &app->clients[id];
 
-    /* Read the data */
-    while (c->inBufSize < 5)
+    /* Read data */
+    size = recv(c->socket, c->inBuf + c->inBufSize, 5 - c->inBufSize, 0);
+    if (size == 0)
     {
-        size = recv(c->socket, c->inBuf + c->inBufSize, 5 - c->inBufSize, 0);
-        if (size < 0)
-            return;
-        c->inBufSize += size;
+        multiClientDisconnect(app, id);
+        return;
     }
+    if (size < 0)
+        return;
+    c->inBufSize += size;
+    if (c->inBufSize < 5)
+        return;
 
     /* We have read the data */
     if (memcmp(c->inBuf, "OoTMM", 5))
     {
         printf("Client #%d: Invalid header\n", id);
-        close(c->socket);
-        c->socket = -1;
+        multiClientRemove(app, id);
         return;
     }
 
@@ -78,6 +94,8 @@ void clientInputNew(App* app, int id)
 
 void multiClientInput(App* app, int id)
 {
+    app->clients[id].timeout = 0;
+
     switch (app->clients[id].state)
     {
     case CL_STATE_NEW:

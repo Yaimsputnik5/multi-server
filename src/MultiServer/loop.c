@@ -1,5 +1,7 @@
 #include <signal.h>
 #include <errno.h>
+#include <sys/timerfd.h>
+#include <time.h>
 #include "multi.h"
 
 static sig_atomic_t sSignaled = 0;
@@ -29,8 +31,30 @@ static void handleNewClients(App* app)
     }
 }
 
+static void handleTimer(App* app)
+{
+    uint64_t v;
+
+    /* Read the timer */
+    read(app->timer, &v, sizeof(v));
+
+    /* Update the clients */
+    for (int i = 0; i < app->clientSize; ++i)
+    {
+        if (app->clients[i].socket == -1)
+            continue;
+        app->clients[i].timeout++;
+        if (app->clients[i].timeout > 30)
+        {
+            printf("Client #%d: Timeout\n", i);
+            multiClientRemove(app, i);
+        }
+    }
+}
+
 static void handleEvent(App* app, const struct epoll_event* e)
 {
+    //printf("EVENT ID %d DATA %08x\n", e->data.u32, e->events);
     switch (APP_EPTYPE(e->data.u32))
     {
     case APP_EP_SOCK_SERVER:
@@ -38,10 +62,44 @@ static void handleEvent(App* app, const struct epoll_event* e)
             handleNewClients(app);
         break;
     case APP_EP_SOCK_CLIENT:
-        if (e->events & EPOLLIN)
+        if (e->events & EPOLLHUP)
+            multiClientDisconnect(app, APP_EPVALUE(e->data.u32));
+        else if (e->events & EPOLLIN)
             multiClientInput(app, APP_EPVALUE(e->data.u32));
         break;
+    case APP_EP_TIMER:
+        if (e->events & EPOLLIN)
+            handleTimer(app);
+        break;
     }
+}
+
+static void runSetup(App* app)
+{
+    struct itimerspec itsp;
+    struct epoll_event event;
+
+    /* Setup signal handlers */
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+
+    /* Setup the timer */
+    app->timer = timerfd_create(CLOCK_MONOTONIC, 0);
+    if (app->timer == -1)
+    {
+        perror("timerfd_create");
+        exit(1);
+    }
+
+    memset(&itsp, 0, sizeof(itsp));
+    itsp.it_value.tv_sec = 1;
+    itsp.it_interval.tv_sec = 1;
+    timerfd_settime(app->timer, 0, &itsp, NULL);
+
+    memset(&event, 0, sizeof(event));
+    event.events = EPOLLIN;
+    event.data.u32 = APP_EP_TIMER;
+    epoll_ctl(app->epoll, EPOLL_CTL_ADD, app->timer, &event);
 }
 
 int multiRun(App* app)
@@ -50,14 +108,15 @@ int multiRun(App* app)
     int ret;
     struct epoll_event events[16];
 
-    /* Setup signal handlers */
-    signal(SIGINT, signalHandler);
-    signal(SIGTERM, signalHandler);
+    /* Setup */
+    runSetup(app);
 
     ret = 0;
     for (;;)
     {
+        //printf("WAIT\n");
         eventCount = epoll_wait(app->epoll, events, 16, -1);
+        //printf("WAIT END %d\n", eventCount);
         if (sSignaled)
             break;
         if (eventCount < 0)

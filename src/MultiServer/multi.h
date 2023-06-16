@@ -15,6 +15,7 @@
 
 #define APP_EP_SOCK_SERVER  0x00000000
 #define APP_EP_SOCK_CLIENT  0x01000000
+#define APP_EP_TIMER        0x02000000
 #define APP_EPTYPE(x)       ((x) & 0xff000000)
 #define APP_EPVALUE(x)      ((x) & 0x00ffffff)
 
@@ -25,6 +26,7 @@ typedef struct
 {
     int socket;
     int state;
+    int timeout;
 
     uint8_t     op;
     char        inBuf[256];
@@ -36,6 +38,7 @@ typedef struct
 {
     int epoll;
     int socket;
+    int timer;
 
     /* Clients */
     uint32_t clientSize;
@@ -50,6 +53,8 @@ int multiListen(App* app, const char* host, uint16_t port);
 int multiRun(App* app);
 
 void multiClientNew(App* app, int s);
+void multiClientDisconnect(App* app, int id);
+void multiClientRemove(App* app, int id);
 void multiClientInput(App* app, int id);
 
 #endif
