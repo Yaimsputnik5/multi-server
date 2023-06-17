@@ -1,0 +1,18 @@
+FROM debian:latest AS builder
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake
+
+WORKDIR /app
+COPY . .
+RUN mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make
+
+FROM debian:latest
+ENV PORT 13248
+ENV HOST "0.0.0.0"
+WORKDIR /app
+RUN mkdir -p /app/bin && mkdir -p /app/data
+COPY --from=builder /app/build/bin/multiserver /app/bin
+COPY ./docker-start.sh /app/bin
+CMD ["/app/bin/docker-start.sh"]
