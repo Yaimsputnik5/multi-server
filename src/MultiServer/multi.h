@@ -27,14 +27,27 @@
 #define OP_NONE             0
 #define OP_TRANSFER         1
 
-#pragma pack(push,1)
+#define PACKED __attribute__((packed))
+
 typedef struct
+{
+    uint64_t* data;
+    uint32_t  size;
+    uint32_t  capacity;
+}
+HashSet64;
+
+void hashset64Init(HashSet64* set);
+void hashset64Free(HashSet64* set);
+void hashset64Add(HashSet64* set, uint64_t value);
+int  hashset64Contains(HashSet64* set, uint64_t value);
+
+typedef struct PAKCED
 {
     uint64_t key;
     uint8_t  size;
 }
 LedgerEntryHeader;
-#pragma pack(pop)
 
 typedef struct
 {
@@ -64,6 +77,8 @@ typedef struct
     int         fileIndex;
     uint32_t    count;
     uint32_t    size;
+
+    HashSet64   keysSet;
 }
 Ledger;
 

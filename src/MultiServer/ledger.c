@@ -30,8 +30,9 @@ int multiLedgerOpen(App* app, const char* uuid)
     id = app->ledgerSize++;
     l = app->ledgers + id;
     l->valid = 1;
-    l->refCount = 1;
+    l->refCount = 0;
     memcpy(l->uuid, uuid, 16);
+    hashset64Init(&l->keysSet);
 
     /* Open ledger files */
     const uint8_t* u = uuid;
@@ -82,12 +83,16 @@ void multiLedgerWrite(App* app, int ledgerId, const void* data)
     const LedgerEntryHeader* header;
 
     l = app->ledgers + ledgerId;
+    header = (const LedgerEntryHeader*)data;
+
+    /* Check for an existing key */
+    if (hashset64Contains(&l->keysSet, header->key))
+        return;
 
     /* Write the index */
     fileWrite(l->fileIndex, &l->size, 4);
 
     /* Write the data */
-    header = (const LedgerEntryHeader*)data;
     fileWrite(l->fileData, data, sizeof(*header) + header->size);
     padding = paddingSize(sizeof(*header) + header->size);
     fileWrite(l->fileData, kZero, padding);
@@ -99,4 +104,7 @@ void multiLedgerWrite(App* app, int ledgerId, const void* data)
     /* Sync */
     fsync(l->fileData);
     fsync(l->fileIndex);
+
+    /* Add the key */
+    hashset64Add(&l->keysSet, header->key);
 }
