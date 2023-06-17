@@ -34,9 +34,10 @@ int multiLedgerOpen(App* app, const char* uuid)
     memcpy(l->uuid, uuid, 16);
 
     /* Open ledger files */
-    snprintf(bufBase, 512, "data/ledgers/%02x", uuid[0]);
+    const uint8_t* u = uuid;
+    snprintf(bufBase, 512, "data/ledgers/%02x", u[0]);
     mkdir(bufBase, 0755);
-    snprintf(bufBase, 512, "data/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+    snprintf(bufBase, 512, "data/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
     mkdir(bufBase, 0755);
     snprintf(buf, 512, "%s/data", bufBase);
     l->fileData = open(buf, O_APPEND | O_RDWR | O_CREAT, 0644);
@@ -87,8 +88,8 @@ void multiLedgerWrite(App* app, int ledgerId, const void* data)
 
     /* Write the data */
     header = (const LedgerEntryHeader*)data;
-    fileWrite(l->fileData, data, header->size);
-    padding = paddingSize(header->size);
+    fileWrite(l->fileData, data, sizeof(*header) + header->size);
+    padding = paddingSize(sizeof(*header) + header->size);
     fileWrite(l->fileData, kZero, padding);
 
     /* Update ledger info */

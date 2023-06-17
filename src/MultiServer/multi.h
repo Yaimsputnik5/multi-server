@@ -1,6 +1,7 @@
 #ifndef MULTI_H
 #define MULTI_H
 
+#define _XOPEN_SOURCE 500
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <string.h>
@@ -26,12 +27,14 @@
 #define OP_NONE             0
 #define OP_TRANSFER         1
 
+#pragma pack(push,1)
 typedef struct
 {
     uint64_t key;
     uint8_t  size;
 }
 LedgerEntryHeader;
+#pragma pack(pop)
 
 typedef struct
 {
@@ -44,6 +47,10 @@ typedef struct
     uint8_t     op;
     char        inBuf[256];
     uint32_t    inBufSize;
+
+    char        outBuf[256];
+    uint32_t    outBufSize;
+    uint32_t    outBufPos;
 }
 Client;
 
@@ -87,6 +94,8 @@ void multiClientNew(App* app, int s);
 void multiClientDisconnect(App* app, int id);
 void multiClientRemove(App* app, int id);
 void multiClientInput(App* app, int id);
+void multiClientNotify(App* app, int id);
+void multiClientOutput(App* app, int id);
 
 int  multiLedgerOpen(App* app, const char* uuid);
 void multiLedgerWrite(App* app, int ledgerId, const void* data);
