@@ -1,12 +1,15 @@
 #include <sys/stat.h>
 #include "multi.h"
 
-int multiInit(App* app)
+int multiInit(App* app, const char* dataDir)
 {
+    char buf[512];
+
     /* Init app */
     app->epoll = epoll_create1(0);
     app->socket = -1;
     app->timer = -1;
+    app->dataDir = dataDir;
 
     app->clientSize = 0;
     app->clientCapacity = 8;
@@ -17,8 +20,9 @@ int multiInit(App* app)
     app->ledgers = malloc(sizeof(Ledger) * app->ledgerCapacity);
 
     /* Init dirs */
-    mkdir("data", 0755);
-    mkdir("data/ledgers", 0755);
+    snprintf(buf, 512, "%s/ledgers", dataDir);
+    mkdir(dataDir, 0755);
+    mkdir(buf, 0755);
 
     return 0;
 }
@@ -56,6 +60,7 @@ int multiListen(App* app, const char* host, uint16_t port)
     bzero(&hints, sizeof(struct addrinfo));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = AI_PASSIVE;
 
     /* Resolve the host */

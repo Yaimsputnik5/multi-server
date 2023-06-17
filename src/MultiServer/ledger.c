@@ -36,9 +36,9 @@ int multiLedgerOpen(App* app, const char* uuid)
 
     /* Open ledger files */
     const uint8_t* u = uuid;
-    snprintf(bufBase, 512, "data/ledgers/%02x", u[0]);
+    snprintf(bufBase, 512, "%s/ledgers/%02x", app->dataDir, u[0]);
     mkdir(bufBase, 0755);
-    snprintf(bufBase, 512, "data/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
+    snprintf(bufBase, 512, "%s/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", app->dataDir, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
     mkdir(bufBase, 0755);
     snprintf(buf, 512, "%s/data", bufBase);
     l->fileData = open(buf, O_APPEND | O_RDWR | O_CREAT, 0644);

@@ -84,9 +84,10 @@ Ledger;
 
 typedef struct
 {
-    int epoll;
-    int socket;
-    int timer;
+    int         epoll;
+    int         socket;
+    int         timer;
+    const char* dataDir;
 
     /* Clients */
     uint32_t clientSize;
@@ -100,7 +101,7 @@ typedef struct
 }
 App;
 
-int multiInit(App* app);
+int multiInit(App* app, const char* dataDir);
 int multiQuit(App* app);
 int multiListen(App* app, const char* host, uint16_t port);
 int multiRun(App* app);
