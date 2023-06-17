@@ -116,6 +116,7 @@ void multiClientOutput(App* app, int id);
 
 int  multiLedgerOpen(App* app, const char* uuid);
 void multiLedgerWrite(App* app, int ledgerId, const void* data);
+void multiLedgerClose(App* app, int ledgerId);
 
 void multiFilePread(int fd, void* dst, uint32_t off, uint32_t size);
 

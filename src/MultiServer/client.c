@@ -59,12 +59,16 @@ void multiClientRemove(App* app, int id)
     if (app->clients[id].socket == -1)
         return;
     ledgerId = app->clients[id].ledgerId;
+    close(app->clients[id].socket);
+    app->clients[id].socket = -1;
+
+    /* Un-ref the ledger */
     if (ledgerId != -1)
     {
         app->ledgers[ledgerId].refCount--;
+        if (app->ledgers[ledgerId].refCount == 0)
+            multiLedgerClose(app, ledgerId);
     }
-    close(app->clients[id].socket);
-    app->clients[id].socket = -1;
 }
 
 static const void* clientRead(App* app, int id, int size)
@@ -91,10 +95,6 @@ static const void* clientRead(App* app, int id, int size)
         return NULL;
 
     /* We have read the data */
-    printf("DATA: ");
-    for (int i = 0; i < c->inBufSize; ++i)
-        printf("%02x ", (uint8_t)c->inBuf[i]);
-    printf("\n");
     return c->inBuf;
 }
 

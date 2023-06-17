@@ -95,20 +95,67 @@ int multiLedgerOpen(App* app, const char* uuid)
             continue;
         if (memcmp(uuid, l->uuid, 16))
             continue;
+        l->refCount++;
         return i;
     }
 
-    /* None exists - create one */
-    if (app->ledgerSize == app->ledgerCapacity)
+    /* Try to re-use a ledger ID */
+    id = -1;
+    for (int i = 0; i < app->ledgerSize; ++i)
     {
-        app->ledgerCapacity *= 2;
-        app->ledgers = realloc(app->ledgers, sizeof(Ledger) * app->ledgerCapacity);
+        l = app->ledgers + i;
+        if (!l->valid)
+        {
+            id = i;
+            break;
+        }
+    }
+
+    if (id == -1)
+    {
+        /* None exists - create one */
+        if (app->ledgerSize == app->ledgerCapacity)
+        {
+            app->ledgerCapacity *= 2;
+            app->ledgers = realloc(app->ledgers, sizeof(Ledger) * app->ledgerCapacity);
+        }
+        id = app->ledgerSize++;
     }
 
     /* Create the ledger */
-    id = app->ledgerSize++;
     makeLedger(app, uuid, id);
+    app->ledgers[id].refCount++;
     return id;
+}
+
+void multiLedgerClose(App* app, int id)
+{
+    Ledger* l;
+    Client* c;
+
+    l = app->ledgers + id;
+    if (!l->valid)
+        return;
+
+    /* Close the ledger */
+    close(l->fileData);
+    l->fileData = -1;
+    l->valid = 0;
+    free(l->index);
+    hashset64Free(&l->keysSet);
+
+    printf("Ledger #%d: Closed\n", id);
+
+    /* Close every client connected to that ledger */
+    for (int i = 0; i < app->clientSize; ++i)
+    {
+        c = app->clients + i;
+        if (c->socket == -1)
+            continue;
+        if (c->ledgerId != id)
+            continue;
+        multiClientDisconnect(app, i);
+    }
 }
 
 static const char kZero[16] = { 0 };

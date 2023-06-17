@@ -37,7 +37,14 @@ int multiQuit(App* app)
     for (int i = 0; i < app->clientSize; ++i)
     {
         if (app->clients[i].socket != -1)
-            close(app->clients[i].socket);
+            multiClientDisconnect(app, i);
+    }
+
+    /* Close ledgers (just in case) */
+    for (int i = 0; i < app->ledgerSize; ++i)
+    {
+        if (app->ledgers[i].valid)
+            multiLedgerClose(app, i);
     }
 
     /* Close epoll */
