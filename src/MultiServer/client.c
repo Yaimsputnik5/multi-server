@@ -245,23 +245,6 @@ void multiClientInput(App* app, int id)
     }
 }
 
-static void filePread(void* dst, int fd, int offset, int size)
-{
-    ssize_t ret;
-
-    while (size)
-    {
-        ret = pread(fd, dst, size, offset);
-        if (ret < 0)
-            return;
-        size -= ret;
-        offset += ret;
-        dst = (char*)dst + ret;
-    }
-
-    return;
-}
-
 static void setClientOutputTrack(App* app, int id, int track)
 {
     struct epoll_event ev;
@@ -294,8 +277,8 @@ static void clientTransfer(App* app, int clientId)
     off = l->index[c->ledgerBase];
     c->outBuf[1] = OP_TRANSFER;
     h = (LedgerEntryHeader*)(c->outBuf + 1);
-    filePread(h, l->fileData, off, sizeof(*h));
-    filePread(c->outBuf + 1 + sizeof(*h), l->fileData, off + sizeof(*h), h->size);
+    multiFilePread(l->fileData, h, off, sizeof(*h));
+    multiFilePread(l->fileData, c->outBuf + 1 + sizeof(*h), off + sizeof(*h), h->size);
     size = 1 + sizeof(*h) + h->size;
     c->outBufSize = size;
     c->outBufPos = 0;

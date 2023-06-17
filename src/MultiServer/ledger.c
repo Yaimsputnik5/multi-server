@@ -1,6 +1,11 @@
 #include <sys/stat.h>
 #include "multi.h"
 
+static int paddingSize(int size)
+{
+    return (16 - (size % 16)) % 16;
+}
+
 static void ledgerSetIndex(Ledger* l, uint32_t entryId, uint32_t idx)
 {
     while (l->indexCapacity <= entryId)
@@ -9,6 +14,37 @@ static void ledgerSetIndex(Ledger* l, uint32_t entryId, uint32_t idx)
         l->index = realloc(l->index, sizeof(uint32_t) * l->indexCapacity);
     }
     l->index[entryId] = idx;
+}
+
+static void ledgerLoadData(Ledger* l)
+{
+    uint32_t totalSize;
+    uint32_t entrySize;
+    LedgerEntryHeader header;
+
+    /* Get the total size */
+    totalSize = lseek(l->fileData, 0, SEEK_END);
+    lseek(l->fileData, 0, SEEK_SET);
+
+    for (;;)
+    {
+        /* Check if we're done */
+        if (l->size == totalSize)
+            break;
+
+        /* Read the header */
+        multiFilePread(l->fileData, &header, l->size, sizeof(header));
+
+        /* Record the key and index */
+        hashset64Add(&l->keysSet, header.key);
+        ledgerSetIndex(l, l->count, l->size);
+
+        /* Skip the entry */
+        entrySize = sizeof(header) + header.size;
+        entrySize += paddingSize(entrySize);
+        l->size += entrySize;
+        l->count++;
+    }
 }
 
 static void makeLedger(App* app, const char* uuid, int id)
@@ -36,12 +72,14 @@ static void makeLedger(App* app, const char* uuid, int id)
     mkdir(bufBase, 0755);
     snprintf(buf, 512, "%s/data", bufBase);
     l->fileData = open(buf, O_APPEND | O_RDWR | O_CREAT, 0644);
-
-    /* Extract entry count and ledger size */
-    //l->count = lseek(l->fileIndex, 0, SEEK_END) / 4;
-    //l->size = lseek(l->fileData, 0, SEEK_END);
     l->count = 0;
     l->size = 0;
+
+    /* Load ledger data */
+    ledgerLoadData(l);
+
+    /* Log */
+    printf("Ledger #%d: Loaded (entries: %d, bytes: %d)\n", id, l->count, l->size);
 }
 
 int multiLedgerOpen(App* app, const char* uuid)
@@ -71,11 +109,6 @@ int multiLedgerOpen(App* app, const char* uuid)
     id = app->ledgerSize++;
     makeLedger(app, uuid, id);
     return id;
-}
-
-int paddingSize(int size)
-{
-    return (16 - (size % 16)) % 16;
 }
 
 static const char kZero[16] = { 0 };

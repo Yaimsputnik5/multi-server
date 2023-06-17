@@ -42,7 +42,7 @@ void hashset64Free(HashSet64* set);
 void hashset64Add(HashSet64* set, uint64_t value);
 int  hashset64Contains(HashSet64* set, uint64_t value);
 
-typedef struct PAKCED
+typedef struct PACKED
 {
     uint64_t key;
     uint8_t  size;
@@ -116,5 +116,7 @@ void multiClientOutput(App* app, int id);
 
 int  multiLedgerOpen(App* app, const char* uuid);
 void multiLedgerWrite(App* app, int ledgerId, const void* data);
+
+void multiFilePread(int fd, void* dst, uint32_t off, uint32_t size);
 
 #endif
