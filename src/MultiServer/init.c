@@ -146,7 +146,7 @@ int multiListen(App* app, const char* host, uint16_t port)
 
     /* Save the socket */
     app->socket = s;
-    printf("Listening on %s:%d\n", host, port);
+    fprintf(stderr, "Listening on %s:%d\n", host, port);
 
     return 0;
 }

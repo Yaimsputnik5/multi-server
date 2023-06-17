@@ -43,12 +43,12 @@ void multiClientNew(App* app, int sock)
     epoll_ctl(app->epoll, EPOLL_CTL_ADD, sock, &event);
 
     /* Log */
-    printf("Client #%d: Connected\n", id);
+    fprintf(stderr, "Client #%d: Connected\n", id);
 }
 
 void multiClientDisconnect(App* app, int id)
 {
-    printf("Client #%d: Disconnected\n", id);
+    fprintf(stderr, "Client #%d: Disconnected\n", id);
     multiClientRemove(app, id);
 }
 
@@ -115,13 +115,13 @@ static void clientInputConnected(App* app, int id)
 
     if (app->ledgers[c->ledgerId].count < base)
     {
-        printf("Client #%d: Invalid base %d\n", id, base);
+        fprintf(stderr, "Client #%d: Invalid base %d\n", id, base);
         multiClientRemove(app, id);
         return;
     }
 
     /* Print */
-    printf("Client #%d: Joined ledger %d\n", id, c->ledgerId);
+    fprintf(stderr, "Client #%d: Joined ledger %d\n", id, c->ledgerId);
 
     /* Set state and self-notify */
     c->state = CL_STATE_READY;
@@ -142,7 +142,7 @@ static void clientInputNew(App* app, int id)
     /* We have read the data */
     if (memcmp(data, "OoTMM", 5))
     {
-        printf("Client #%d: Invalid header\n", id);
+        fprintf(stderr, "Client #%d: Invalid header\n", id);
         multiClientRemove(app, id);
         return;
     }
@@ -152,7 +152,7 @@ static void clientInputNew(App* app, int id)
     send(c->socket, "OoTMM", 5, 0);
 
     /* Log */
-    printf("Client #%d: Valid header\n", id);
+    fprintf(stderr, "Client #%d: Valid header\n", id);
 
     /* Set state and try to join */
     c->state = CL_STATE_CONNECTED;
@@ -172,7 +172,7 @@ static void clientInputTransfer(App* app, int id)
     memcpy(&header, data, sizeof(header));
     if (header.size > 128)
     {
-        printf("Client #%d: Invalid transfer size %d\n", id, header.size);
+        fprintf(stderr, "Client #%d: Invalid transfer size %d\n", id, header.size);
         multiClientRemove(app, id);
         return;
     }
@@ -180,7 +180,7 @@ static void clientInputTransfer(App* app, int id)
     if (!data)
         return;
     c->inBufSize = 0;
-    printf("Client #%d: Transfer %d bytes\n", id, header.size);
+    fprintf(stderr, "Client #%d: Transfer %d bytes\n", id, header.size);
     multiLedgerWrite(app, c->ledgerId, data);
 
     /* Set the op to NOP */
@@ -221,7 +221,7 @@ static void clientInputReady(App* app, int id)
         clientInputTransfer(app, id);
         break;
     default:
-        printf("Client #%d: Invalid operation %d\n", id, c->op);
+        fprintf(stderr, "Client #%d: Invalid operation %d\n", id, c->op);
         multiClientRemove(app, id);
         return;
     }

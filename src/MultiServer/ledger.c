@@ -79,7 +79,7 @@ static void makeLedger(App* app, const char* uuid, int id)
     ledgerLoadData(l);
 
     /* Log */
-    printf("Ledger #%d: Loaded (entries: %d, bytes: %d)\n", id, l->count, l->size);
+    fprintf(stderr, "Ledger #%d: Loaded (entries: %d, bytes: %d)\n", id, l->count, l->size);
 }
 
 int multiLedgerOpen(App* app, const char* uuid)
@@ -144,7 +144,7 @@ void multiLedgerClose(App* app, int id)
     free(l->index);
     hashset64Free(&l->keysSet);
 
-    printf("Ledger #%d: Closed\n", id);
+    fprintf(stderr, "Ledger #%d: Closed\n", id);
 
     /* Close every client connected to that ledger */
     for (int i = 0; i < app->clientSize; ++i)

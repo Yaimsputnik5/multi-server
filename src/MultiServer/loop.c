@@ -148,7 +148,7 @@ int multiRun(App* app)
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
 
-    printf("Shutting down\n");
+    fprintf(stderr, "Server: Shutting down\n");
 
     return ret;
 }
