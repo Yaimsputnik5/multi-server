@@ -313,16 +313,15 @@ void multiClientOutput(App* app, int id)
     c = &app->clients[id];
 
     /* Send the output */
-    while (c->outBufSize)
+    while (c->outBufPos < c->outBufSize)
     {
-        ret = send(c->socket, c->outBuf + c->outBufPos, c->outBufSize, 0);
+        ret = send(c->socket, c->outBuf + c->outBufPos, c->outBufSize - c->outBufPos, 0);
         if (ret <= 0)
         {
             setClientOutputTrack(app, id, 1);
             return;
         }
         c->outBufPos += ret;
-        c->outBufSize -= ret;
     }
 
     /* We have sent the output */

@@ -199,7 +199,7 @@ void multiLedgerWrite(App* app, int ledgerId, const void* data)
     fileWrite(l->fileData, kZero, padding);
 
     /* Update ledger info */
-    l->size += header->size + padding;
+    l->size += sizeof(*header) + header->size + padding;
     l->count++;
 
     /* Sync */
