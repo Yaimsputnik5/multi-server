@@ -74,7 +74,8 @@ typedef struct
     int     refCount;
 
     int         fileData;
-    int         fileIndex;
+    uint32_t    indexCapacity;
+    uint32_t*   index;
     uint32_t    count;
     uint32_t    size;
 
