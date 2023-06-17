@@ -275,7 +275,7 @@ static void clientTransfer(App* app, int clientId)
 
     /* Prepare the payload */
     off = l->index[c->ledgerBase];
-    c->outBuf[1] = OP_TRANSFER;
+    c->outBuf[0] = OP_TRANSFER;
     h = (LedgerEntryHeader*)(c->outBuf + 1);
     multiFilePread(l->fileData, h, off, sizeof(*h));
     multiFilePread(l->fileData, c->outBuf + 1 + sizeof(*h), off + sizeof(*h), h->size);
