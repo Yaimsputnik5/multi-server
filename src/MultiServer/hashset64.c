@@ -76,7 +76,7 @@ int hashset64Contains(HashSet64* set, uint64_t value)
 {
     uint32_t h;
     uint32_t bucket;
-    uint32_t tmp;
+    uint64_t tmp;
 
     h = hsHash(value);
     bucket = h & (set->capacity - 1);
