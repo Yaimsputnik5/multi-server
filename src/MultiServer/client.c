@@ -319,7 +319,7 @@ void multiClientCmdMsg(App* app, Client* client)
     }
 
     /* Make the message */
-    if (multiClientRead(app, client, data + 4, size))
+    if (multiClientRead(app, client, data + 3, size + 1))
         return;
     data[0] = OP_MSG;
     data[1] = (char)size;
