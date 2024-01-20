@@ -28,6 +28,7 @@
 #define OP_TRANSFER         1
 
 #define PACKED __attribute__((packed))
+#define BUFFER_SIZE 16384
 
 typedef struct
 {
@@ -51,9 +52,21 @@ LedgerEntryHeader;
 
 typedef struct
 {
-    int         socket;
-    int         state;
-    int         timeout;
+    char*       data;
+    uint32_t    size;
+    uint32_t    capacity;
+    uint32_t    pos;
+}
+NetworkBuffer;
+
+typedef struct
+{
+    int  id;
+    int  socket;
+    int  state;
+    int  timeout;
+    int  error;
+
     uint32_t    version;
 
     int         ledgerId;
@@ -63,9 +76,10 @@ typedef struct
     char        inBuf[256];
     uint32_t    inBufSize;
 
-    char        outBuf[256];
-    uint32_t    outBufSize;
-    uint32_t    outBufPos;
+    NetworkBuffer tx;
+
+    int txTimeout;
+    int rxTimeout;
 }
 Client;
 
@@ -90,6 +104,7 @@ typedef struct
     int         epoll;
     int         socket;
     int         timer;
+    int         error;
     const char* dataDir;
 
     /* Clients */
@@ -121,5 +136,11 @@ void multiLedgerWrite(App* app, int ledgerId, const void* data);
 void multiLedgerClose(App* app, int ledgerId);
 
 void multiFilePread(int fd, void* dst, uint32_t off, uint32_t size);
+
+void    multiClientEventTimer(App* app, Client* client);
+void    multiClientEventOutput(App* app, Client* client);
+void    multiClientTransferLedger(App* app, Client* client);
+int     multiClientWrite(App* app, Client* client, const void* data, uint32_t size);
+int     multiClientFlush(App* app, Client* client);
 
 #endif

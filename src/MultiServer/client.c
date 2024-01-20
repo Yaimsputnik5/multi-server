@@ -1,4 +1,19 @@
+#include <errno.h>
 #include "multi.h"
+
+static void bufferInit(NetworkBuffer* buf)
+{
+    buf->data = malloc(512);
+    buf->size = 0;
+    buf->capacity = 512;
+    buf->pos = 0;
+}
+
+static void bufferFree(NetworkBuffer* buf)
+{
+    free(buf->data);
+    buf->data = NULL;
+}
 
 static int newClientId(App* app)
 {
@@ -28,18 +43,21 @@ void multiClientNew(App* app, int sock)
     /* Setup the new client */
     id = newClientId(app);
     client = &app->clients[id];
+    client->id = id;
     client->socket = sock;
     client->state = CL_STATE_NEW;
     client->timeout = 0;
+    client->error = 0;
     client->version = 0;
     client->ledgerId = -1;
     client->op = 0;
     client->inBufSize = 0;
-    client->outBufSize = 0;
-    client->outBufPos = 0;
+    bufferInit(&client->tx);
+    client->txTimeout = 0;
+    client->rxTimeout = 0;
 
-    /* Add the client to epoll */
-    event.events = EPOLLIN;
+    /* Configure epoll */
+    event.events = EPOLLIN | EPOLLOUT | EPOLLET;
     event.data.u32 = APP_EP_SOCK_CLIENT | id;
     epoll_ctl(app->epoll, EPOLL_CTL_ADD, sock, &event);
 
@@ -62,6 +80,8 @@ void multiClientRemove(App* app, int id)
     ledgerId = app->clients[id].ledgerId;
     close(app->clients[id].socket);
     app->clients[id].socket = -1;
+
+    bufferFree(&app->clients[id].tx);
 
     /* Un-ref the ledger */
     if (ledgerId != -1)
@@ -126,7 +146,7 @@ static void clientInputConnected(App* app, int id)
 
     /* Set state and self-notify */
     c->state = CL_STATE_READY;
-    multiClientNotify(app, id);
+    multiClientTransferLedger(app, c);
 }
 
 static void clientInputNew(App* app, int id)
@@ -166,11 +186,10 @@ static void clientInputNew(App* app, int id)
     c->version = version;
 
     /* Reply */
-    /* This is the first message, so we assume the send will succeed */
     if (version)
-        send(c->socket, "OOMM2", 5, 0);
+        multiClientWrite(app, c, "OOMM2", 5);
     else
-        send(c->socket, "OoTMM", 5, 0);
+        multiClientWrite(app, c, "OoTMM", 5);
 
     /* Log */
     fprintf(stderr, "Client #%d: Valid header\n", id);
@@ -214,7 +233,7 @@ static void clientInputTransfer(App* app, int id)
             continue;
         if (app->clients[i].ledgerId != c->ledgerId)
             continue;
-        multiClientNotify(app, i);
+        multiClientTransferLedger(app, &app->clients[i]);
     }
 }
 
@@ -266,89 +285,185 @@ void multiClientInput(App* app, int id)
     }
 }
 
-static void setClientOutputTrack(App* app, int id, int track)
+static void* bufferReserve(NetworkBuffer* buf, uint32_t size)
 {
-    struct epoll_event ev;
+    uint32_t newCapacity;
+    char* newData;
 
-    ev.events = EPOLLIN;
-    if (track)
-        ev.events |= EPOLLOUT;
-    ev.data.u32 = APP_EP_SOCK_CLIENT | id;
-    epoll_ctl(app->epoll, EPOLL_CTL_MOD, app->clients[id].socket, &ev);
-}
-
-static void clientTransfer(App* app, int clientId)
-{
-    Client* c;
-    Ledger* l;
-    LedgerEntryHeader* h;
-    uint32_t off;
-    int size;
-
-    c = &app->clients[clientId];
-    l = &app->ledgers[c->ledgerId];
-
-    if (l->count <= c->ledgerBase)
+    /* Check for space */
+    if (buf->size + size > buf->capacity)
     {
-        setClientOutputTrack(app, clientId, 0);
-        return;
-    }
-
-    /* Prepare the payload */
-    off = l->index[c->ledgerBase];
-    c->outBuf[0] = OP_TRANSFER;
-    h = (LedgerEntryHeader*)(c->outBuf + 1);
-    multiFilePread(l->fileData, h, off, sizeof(*h));
-    multiFilePread(l->fileData, c->outBuf + 1 + sizeof(*h), off + sizeof(*h), h->size);
-    size = 1 + sizeof(*h) + h->size;
-    c->outBufSize = size;
-    c->outBufPos = 0;
-    c->ledgerBase++;
-
-    /* Trigger some output */
-    multiClientOutput(app, clientId);
-}
-
-void multiClientNotify(App* app, int id)
-{
-    Client* c;
-
-    /* Get client and check preconds */
-    c = &app->clients[id];
-    if (c->socket == -1)
-        return;
-    if (c->state != CL_STATE_READY)
-        return;
-    if (c->outBufSize)
-        return;
-
-    /* We need to send at least one entry */
-    clientTransfer(app, id);
-}
-
-void multiClientOutput(App* app, int id)
-{
-    Client* c;
-    int ret;
-
-    c = &app->clients[id];
-
-    /* Send the output */
-    while (c->outBufPos < c->outBufSize)
-    {
-        ret = send(c->socket, c->outBuf + c->outBufPos, c->outBufSize - c->outBufPos, 0);
-        if (ret <= 0)
+        /* Compute the new capacity */
+        do
         {
-            setClientOutputTrack(app, id, 1);
-            return;
+            newCapacity = buf->capacity * 2;
+            if (newCapacity > BUFFER_SIZE)
+                newCapacity = BUFFER_SIZE;
+
+            /* If a max size buffer still doesn't fit, abort */
+            if (newCapacity == buf->capacity)
+                return NULL;
         }
-        c->outBufPos += ret;
+        while (buf->size + size > newCapacity);
+
+        /* Realloc */
+        newData = realloc(buf->data, newCapacity);
+        if (!newData)
+            return NULL;
+        buf->data = newData;
+        buf->capacity = newCapacity;
     }
 
-    /* We have sent the output */
-    c->outBufSize = 0;
-    c->outBufPos = 0;
+    /* We know we have enough space */
+    return buf->data + buf->size;
+}
 
-    /* Trigger more output */
-    clientTransfer(app, id);
+/**
+ * Called periodically to handle timeouts.
+ */
+void multiClientEventTimer(App* app, Client* client)
+{
+    char nop;
+
+    if (client->error)
+        return;
+
+    /* Handle tx - send NOPs if we haven't sent anything in a while */
+    client->txTimeout++;
+    if (client->state == CL_STATE_READY && client->txTimeout > 3)
+    {
+        nop = OP_NONE;
+        multiClientWrite(app, client, &nop, 1);
+    }
+
+    /* Handle rx */
+    client->rxTimeout++;
+    if (client->rxTimeout > 30)
+    {
+        fprintf(stderr, "Client #%d: Timeout\n", client->id);
+        //multiClientRemove(app, client - app->clients);
+    }
+}
+
+/**
+ * Called every time a client is ready to send.
+ */
+void multiClientEventOutput(App* app, Client* client)
+{
+    if (client->error)
+        return;
+
+    /* First we need to flush the buffer */
+    multiClientFlush(app, client);
+
+    /* A ledger send might have been interrupted, resume if required */
+    multiClientTransferLedger(app, client);
+}
+
+void multiClientTransferLedger(App* app, Client* client)
+{
+    Ledger* ledger;
+    LedgerEntryHeader* header;
+    uint32_t off;
+    uint32_t size;
+    char buffer[512];
+
+    if (client->error)
+        return;
+    if (client->state != CL_STATE_READY)
+        return;
+
+    ledger = &app->ledgers[client->ledgerId];
+    for (;;)
+    {
+        /* Check if we're at the end of the ledger */
+        if (ledger->count <= client->ledgerBase)
+            return;
+
+        /* Prepare the payload */
+        off = ledger->index[client->ledgerBase];
+        buffer[0] = OP_TRANSFER;
+        header = (LedgerEntryHeader*)(buffer + 1);
+        multiFilePread(ledger->fileData, header, off, sizeof(*header));
+        multiFilePread(ledger->fileData, buffer + 1 + sizeof(*header), off + sizeof(*header), header->size);
+        size = 1 + sizeof(*header) + header->size;
+
+        /* Send the entry */
+        if (multiClientWrite(app, client, buffer, size))
+            return;
+
+        /* Entry is either sent or in the tx queue - either way, we're past it */
+        client->ledgerBase++;
+    }
+}
+
+/**
+ * Send buffered data to the client.
+ * @param client The client
+ * @param data The data to send
+ * @param size The size of the data
+ * @return 0 on success, -1 on error
+ */
+int multiClientWrite(App* app, Client* client, const void* data, uint32_t size)
+{
+    void* dst;
+
+    /* Check for errored client */
+    if (client->error)
+        return -1;
+
+    /* Allocate */
+    dst = bufferReserve(&client->tx, size);
+    if (!dst)
+        return -1;
+
+    /* Copy */
+    memcpy(dst, data, size);
+    client->tx.size += size;
+
+    /* Reset the tx timeout */
+    client->txTimeout = 0;
+
+    /* Trigger output */
+    return multiClientFlush(app, client);
+}
+
+/**
+ * Flush buffered data to the client.
+ * @param client The client
+ * @return 0 on success, -1 on error
+ */
+int multiClientFlush(App* app, Client* client)
+{
+    ssize_t ret;
+
+    (void)app;
+
+    if (client->error)
+        return -1;
+
+    for (;;)
+    {
+        /* Check for empty tx buffer */
+        if (client->tx.pos == client->tx.size)
+        {
+            client->tx.pos = 0;
+            client->tx.size = 0;
+            return 0;
+        }
+
+        /* Send */
+        ret = send(client->socket, client->tx.data + client->tx.pos, client->tx.size - client->tx.pos, 0);
+        if (ret >= 0)
+        {
+            client->tx.pos += ret;
+        }
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return 0;
+            client->error = 1;
+            return -1;
+        }
+    }
 }
