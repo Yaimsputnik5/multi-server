@@ -133,6 +133,34 @@ void multiClientProcess(App* app, Client* client)
     }
 }
 
+static void newClientReply(App* app, Client* client)
+{
+    uint32_t tmp32;
+    uint16_t tmp16;
+    char data[16];
+    int size;
+
+    if (!client->valid)
+        return;
+
+    if (!client->version)
+    {
+        memcpy(data, "OoTMM", 5);
+        size = 5;
+    }
+    else
+    {
+        memcpy(data, "OOMM2", 5);
+        tmp32 = VERSION;
+        memcpy(data + 5, &tmp32, 4);
+        tmp16 = (uint16_t)client->id;
+        memcpy(data + 9, &tmp16, 2);
+        size = 11;
+    }
+
+    multiClientWrite(app, client, data, size);
+}
+
 void multiClientProcessNew(App* app, Client* client)
 {
     char buf[9];
@@ -162,11 +190,7 @@ void multiClientProcessNew(App* app, Client* client)
         return;
     }
 
-    /* Reply */
-    if (client->version)
-        multiClientWrite(app, client, "OOMM2", 5);
-    else
-        multiClientWrite(app, client, "OoTMM", 5);
+    newClientReply(app, client);
 
     /* Log */
     fprintf(stderr, "Client #%d: Valid header\n", client->id);

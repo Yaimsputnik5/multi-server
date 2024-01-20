@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define VERSION 0x00000200
+
 #define APP_EP_SOCK_SERVER  0x00000000
 #define APP_EP_SOCK_CLIENT  0x01000000
 #define APP_EP_TIMER        0x02000000
