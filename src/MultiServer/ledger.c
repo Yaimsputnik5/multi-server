@@ -150,11 +150,11 @@ void multiLedgerClose(App* app, int id)
     for (int i = 0; i < app->clientSize; ++i)
     {
         c = app->clients + i;
-        if (c->socket == -1)
+        if (!c->valid)
             continue;
         if (c->ledgerId != id)
             continue;
-        multiClientDisconnect(app, i);
+        multiClientDisconnect(app, c);
     }
 }
 

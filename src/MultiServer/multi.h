@@ -62,10 +62,9 @@ NetworkBuffer;
 typedef struct
 {
     int  id;
+    int  valid;
     int  socket;
     int  state;
-    int  timeout;
-    int  error;
 
     uint32_t    version;
 
@@ -73,13 +72,12 @@ typedef struct
     uint32_t    ledgerBase;
 
     uint8_t     op;
-    char        inBuf[256];
-    uint32_t    inBufSize;
 
+    NetworkBuffer rx;
     NetworkBuffer tx;
 
-    int txTimeout;
     int rxTimeout;
+    int txTimeout;
 }
 Client;
 
@@ -124,23 +122,30 @@ int multiQuit(App* app);
 int multiListen(App* app, const char* host, uint16_t port);
 int multiRun(App* app);
 
-void multiClientNew(App* app, int s);
-void multiClientDisconnect(App* app, int id);
-void multiClientRemove(App* app, int id);
-void multiClientInput(App* app, int id);
-void multiClientNotify(App* app, int id);
-void multiClientOutput(App* app, int id);
-
 int  multiLedgerOpen(App* app, const char* uuid);
 void multiLedgerWrite(App* app, int ledgerId, const void* data);
 void multiLedgerClose(App* app, int ledgerId);
 
 void multiFilePread(int fd, void* dst, uint32_t off, uint32_t size);
 
-void    multiClientEventTimer(App* app, Client* client);
-void    multiClientEventOutput(App* app, Client* client);
-void    multiClientTransferLedger(App* app, Client* client);
-int     multiClientWrite(App* app, Client* client, const void* data, uint32_t size);
-int     multiClientFlush(App* app, Client* client);
+/* Client */
+Client*     multiClientNew(App* app, int socket);
+void        multiClientRemove(App* app, Client* client);
+void        multiClientDisconnect(App* app, Client* client);
+void        multiClientProcess(App* app, Client* client);
+void        multiClientProcessNew(App* app, Client* client);
+void        multiClientProcessConnected(App* app, Client* client);
+void        multiClientProcessReady(App* app, Client* client);
+void        multiClientCmdTransfer(App* app, Client* client);
+void        multiClientEventTimer(App* app, Client* client);
+void        multiClientEventInput(App* app, Client* client);
+void        multiClientEventOutput(App* app, Client* client);
+void        multiClientTransferLedger(App* app, Client* client);
+int         multiClientPeek(App* app, Client* client, void* dst, uint32_t size);
+int         multiClientRead(App* app, Client* client, void* dst, uint32_t size);
+int         multiClientWrite(App* app, Client* client, const void* data, uint32_t size);
+int         multiClientFlushIn(App* app, Client* client);
+int         multiClientFlushOut(App* app, Client* client);
+
 
 #endif

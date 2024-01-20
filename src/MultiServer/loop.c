@@ -31,11 +31,20 @@ static void handleNewClients(App* app)
     }
 }
 
+static void handleTimer(App* app)
+{
+    uint64_t value;
+
+    /* Read the timer */
+    read(app->timer, &value, sizeof(value));
+
+    /* Handle the timer */
+    for (int i = 0; i < app->clientSize; ++i)
+        multiClientEventTimer(app, &app->clients[i]);
+}
+
 static void handleEvent(App* app, const struct epoll_event* e)
 {
-    /* DEBUG */
-    printf("EVENT ID %d DATA %08x\n", e->data.u32, e->events);
-
     switch (APP_EPTYPE(e->data.u32))
     {
     case APP_EP_SOCK_SERVER:
@@ -45,20 +54,16 @@ static void handleEvent(App* app, const struct epoll_event* e)
     case APP_EP_SOCK_CLIENT:
         if (e->events & EPOLLHUP)
         {
-            multiClientDisconnect(app, APP_EPVALUE(e->data.u32));
+            multiClientDisconnect(app, &app->clients[APP_EPVALUE(e->data.u32)]);
             break;
         }
         if (e->events & EPOLLIN)
-            multiClientInput(app, APP_EPVALUE(e->data.u32));
+            multiClientEventInput(app, &app->clients[APP_EPVALUE(e->data.u32)]);
         if (e->events & EPOLLOUT)
             multiClientEventOutput(app, &app->clients[APP_EPVALUE(e->data.u32)]);
         break;
     case APP_EP_TIMER:
-        if (e->events & EPOLLIN)
-        {
-            for (int i = 0; i < app->clientSize; ++i)
-                multiClientEventTimer(app, &app->clients[i]);
-        }
+        handleTimer(app);
         break;
     }
 }
