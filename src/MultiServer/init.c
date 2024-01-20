@@ -36,8 +36,8 @@ int multiQuit(App* app)
     /* Close client sockets */
     for (int i = 0; i < app->clientSize; ++i)
     {
-        if (app->clients[i].socket != -1)
-            multiClientDisconnect(app, i);
+        if (app->clients[i].valid)
+            multiClientDisconnect(app, &app->clients[i]);
     }
 
     /* Close ledgers (just in case) */

@@ -33,37 +33,18 @@ static void handleNewClients(App* app)
 
 static void handleTimer(App* app)
 {
-    uint64_t v;
-    char z;
-
-    z = 0;
+    uint64_t value;
 
     /* Read the timer */
-    read(app->timer, &v, sizeof(v));
+    read(app->timer, &value, sizeof(value));
 
-    /* Update the clients */
+    /* Handle the timer */
     for (int i = 0; i < app->clientSize; ++i)
-    {
-        if (app->clients[i].socket == -1)
-            continue;
-
-        app->clients[i].timeout++;
-        if (app->clients[i].timeout > 30)
-        {
-            printf("Client #%d: Timeout\n", i);
-            multiClientRemove(app, i);
-            continue;
-        }
-
-        /* If the client is ready and no output pending, send a NOP */
-        if (app->clients[i].state == CL_STATE_READY && app->clients[i].outBufSize == 0)
-            send(app->clients[i].socket, &z, 1, 0);
-    }
+        multiClientEventTimer(app, &app->clients[i]);
 }
 
 static void handleEvent(App* app, const struct epoll_event* e)
 {
-    //printf("EVENT ID %d DATA %08x\n", e->data.u32, e->events);
     switch (APP_EPTYPE(e->data.u32))
     {
     case APP_EP_SOCK_SERVER:
@@ -73,17 +54,16 @@ static void handleEvent(App* app, const struct epoll_event* e)
     case APP_EP_SOCK_CLIENT:
         if (e->events & EPOLLHUP)
         {
-            multiClientDisconnect(app, APP_EPVALUE(e->data.u32));
+            multiClientDisconnect(app, &app->clients[APP_EPVALUE(e->data.u32)]);
             break;
         }
         if (e->events & EPOLLIN)
-            multiClientInput(app, APP_EPVALUE(e->data.u32));
+            multiClientEventInput(app, &app->clients[APP_EPVALUE(e->data.u32)]);
         if (e->events & EPOLLOUT)
-            multiClientOutput(app, APP_EPVALUE(e->data.u32));
+            multiClientEventOutput(app, &app->clients[APP_EPVALUE(e->data.u32)]);
         break;
     case APP_EP_TIMER:
-        if (e->events & EPOLLIN)
-            handleTimer(app);
+        handleTimer(app);
         break;
     }
 }

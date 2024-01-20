@@ -1,11 +1,26 @@
+#include <errno.h>
 #include "multi.h"
+
+static void bufferInit(NetworkBuffer* buf)
+{
+    buf->data = malloc(512);
+    buf->size = 0;
+    buf->capacity = 512;
+    buf->pos = 0;
+}
+
+static void bufferFree(NetworkBuffer* buf)
+{
+    free(buf->data);
+    buf->data = NULL;
+}
 
 static int newClientId(App* app)
 {
     /* Try to re-use a client ID */
     for (int i = 0; i < app->clientSize; ++i)
     {
-        if (app->clients[i].socket == -1)
+        if (!app->clients[i].valid)
             return i;
     }
 
@@ -19,48 +34,64 @@ static int newClientId(App* app)
     return app->clientSize++;
 }
 
-void multiClientNew(App* app, int sock)
+Client* multiClientNew(App* app, int sock)
 {
     struct epoll_event event;
     int id;
     Client* client;
 
-    /* Setup the new client */
+    /* Get a client */
     id = newClientId(app);
     client = &app->clients[id];
+    memset(client, 0, sizeof(*client));
+
+    /* Init */
+    client->id = id;
+    client->valid = 1;
     client->socket = sock;
     client->state = CL_STATE_NEW;
-    client->timeout = 0;
     client->ledgerId = -1;
-    client->op = 0;
-    client->inBufSize = 0;
-    client->outBufSize = 0;
-    client->outBufPos = 0;
 
-    /* Add the client to epoll */
-    event.events = EPOLLIN;
+    bufferInit(&client->rx);
+    bufferInit(&client->tx);
+
+    /* Configure epoll */
+    event.events = EPOLLIN | EPOLLOUT | EPOLLET;
     event.data.u32 = APP_EP_SOCK_CLIENT | id;
     epoll_ctl(app->epoll, EPOLL_CTL_ADD, sock, &event);
 
     /* Log */
     fprintf(stderr, "Client #%d: Connected\n", id);
+
+    /* Start processing */
+    multiClientProcessNew(app, client);
+
+    return client;
 }
 
-void multiClientDisconnect(App* app, int id)
+void multiClientDisconnect(App* app, Client* client)
 {
-    fprintf(stderr, "Client #%d: Disconnected\n", id);
-    multiClientRemove(app, id);
+    if (!client->valid)
+        return;
+
+    fprintf(stderr, "Client #%d: Disconnected\n", client->id);
+    shutdown(client->socket, SHUT_RDWR);
+    multiClientRemove(app, client);
 }
 
-void multiClientRemove(App* app, int id)
+void multiClientRemove(App* app, Client* client)
 {
     int ledgerId;
 
-    if (app->clients[id].socket == -1)
+    if (!client->valid)
         return;
-    ledgerId = app->clients[id].ledgerId;
-    close(app->clients[id].socket);
-    app->clients[id].socket = -1;
+
+    /* Destroy the client */
+    client->valid = 0;
+    ledgerId = client->ledgerId;
+    close(client->socket);
+    bufferFree(&client->rx);
+    bufferFree(&client->tx);
 
     /* Un-ref the ledger */
     if (ledgerId != -1)
@@ -71,263 +102,548 @@ void multiClientRemove(App* app, int id)
     }
 }
 
-static const void* clientRead(App* app, int id, int size)
+void multiClientEventInput(App* app, Client* client)
 {
-    Client* c;
-    int ret;
+    if (!client->valid)
+        return;
 
-    c = &app->clients[id];
+    /* If there is an error, exit early */
+    if (multiClientFlushIn(app, client))
+        return;
 
-    if (c->inBufSize >= size)
-        return c->inBuf;
-
-    /* Read data */
-    ret = recv(c->socket, c->inBuf + c->inBufSize, size - c->inBufSize, 0);
-    if (ret == 0)
-    {
-        multiClientDisconnect(app, id);
-        return NULL;
-    }
-    if (ret < 0)
-        return NULL;
-    c->inBufSize += ret;
-    if (c->inBufSize < size)
-        return NULL;
-
-    /* We have read the data */
-    return c->inBuf;
+    multiClientProcess(app, client);
 }
 
-static void clientInputConnected(App* app, int id)
+void multiClientProcess(App* app, Client* client)
 {
-    Client* c;
-    const void* data;
-    uint32_t base;
-
-    c = &app->clients[id];
-    data = clientRead(app, id, 20);
-    if (!data)
+    if (!client->valid)
         return;
-    c->inBufSize = 0;
-    memcpy(&base, (const char*)data + 16, 4);
-    c->ledgerBase = base;
-    c->ledgerId = multiLedgerOpen(app, data);
 
-    if (app->ledgers[c->ledgerId].count < base)
+    switch (client->state)
     {
-        fprintf(stderr, "Client #%d: Invalid base %d\n", id, base);
-        multiClientRemove(app, id);
+    case CL_STATE_NEW:
+        multiClientProcessNew(app, client);
+        break;
+    case CL_STATE_CONNECTED:
+        multiClientProcessConnected(app, client);
+        break;
+    case CL_STATE_READY:
+        multiClientProcessReady(app, client);
+        break;
+    }
+}
+
+static void newClientReply(App* app, Client* client)
+{
+    uint32_t tmp32;
+    uint16_t tmp16;
+    char data[16];
+    int size;
+
+    if (!client->valid)
+        return;
+
+    if (!client->version)
+    {
+        memcpy(data, "OoTMM", 5);
+        size = 5;
+    }
+    else
+    {
+        memcpy(data, "OOMM2", 5);
+        tmp32 = VERSION;
+        memcpy(data + 5, &tmp32, 4);
+        tmp16 = (uint16_t)client->id;
+        memcpy(data + 9, &tmp16, 2);
+        size = 11;
+    }
+
+    multiClientWrite(app, client, data, size);
+}
+
+void multiClientProcessNew(App* app, Client* client)
+{
+    char buf[9];
+
+    if (multiClientPeek(app, client, buf, 5))
+        return;
+
+    if (memcmp(buf, "OOMM2", 5) == 0)
+    {
+        /* New header */
+        if (multiClientRead(app, client, buf, 9))
+            return;
+        memcpy(&client->version, buf + 5, 4);
+
+    }
+    else if (memcmp(buf, "OoTMM", 5) == 0)
+    {
+        /* Old header */
+        if (multiClientRead(app, client, NULL, 5))
+            return;
+        client->version = 0;
+    }
+    else
+    {
+        fprintf(stderr, "Client #%d: Invalid header\n", client->id);
+        multiClientRemove(app, client);
+        return;
+    }
+
+    newClientReply(app, client);
+
+    /* Log */
+    fprintf(stderr, "Client #%d: Valid header\n", client->id);
+
+    /* Set state and try to join */
+    client->state = CL_STATE_CONNECTED;
+    multiClientProcessConnected(app, client);
+}
+
+void multiClientProcessConnected(App* app, Client* client)
+{
+    char data[20];
+
+    if (multiClientRead(app, client, data, 20))
+        return;
+
+    /* Copy the ledger base */
+    memcpy(&client->ledgerBase, data + 16, 4);
+    client->ledgerId = multiLedgerOpen(app, data);
+    if (client->ledgerId == -1)
+    {
+        fprintf(stderr, "Client #%d: Invalid ledger\n", client->id);
+        multiClientRemove(app, client);
+        return;
+    }
+
+    if (app->ledgers[client->ledgerId].count < client->ledgerBase)
+    {
+        fprintf(stderr, "Client #%d: Invalid base %d\n", client->id, client->ledgerBase);
+        multiClientRemove(app, client);
         return;
     }
 
     /* Print */
-    fprintf(stderr, "Client #%d: Joined ledger %d\n", id, c->ledgerId);
+    fprintf(stderr, "Client #%d: Joined ledger %d\n", client->id, client->ledgerId);
 
-    /* Set state and self-notify */
-    c->state = CL_STATE_READY;
-    multiClientNotify(app, id);
+    /* Set state */
+    client->state = CL_STATE_READY;
+
+    /* Transfer the ledger & run commands */
+    multiClientTransferLedger(app, client);
+    multiClientProcessReady(app, client);
 }
 
-static void clientInputNew(App* app, int id)
+void multiClientProcessReady(App* app, Client* client)
 {
-    Client* c;
-    const void* data;
-
-    c = &app->clients[id];
-    data = clientRead(app, id, 5);
-    if (!data)
+    if (!client->valid)
         return;
-    c->inBufSize = 0;
 
-    /* We have read the data */
-    if (memcmp(data, "OoTMM", 5))
+    /* Process commands */
+    for (;;)
     {
-        fprintf(stderr, "Client #%d: Invalid header\n", id);
-        multiClientRemove(app, id);
-        return;
+        switch (client->op)
+        {
+        case OP_NONE:
+            if (multiClientRead(app, client, &client->op, 1))
+                return;
+            break;
+        case OP_TRANSFER:
+            multiClientCmdTransfer(app, client);
+            break;
+        case OP_MSG:
+            multiClientCmdMsg(app, client);
+            return;
+        default:
+            fprintf(stderr, "Client #%d: Invalid operation %d\n", client->id, client->op);
+            multiClientRemove(app, client);
+            return;
+        }
     }
-
-    /* Reply */
-    /* This is the first message, so we assume the send will succeed */
-    send(c->socket, "OoTMM", 5, 0);
-
-    /* Log */
-    fprintf(stderr, "Client #%d: Valid header\n", id);
-
-    /* Set state and try to join */
-    c->state = CL_STATE_CONNECTED;
-    clientInputConnected(app, id);
 }
 
-static void clientInputTransfer(App* app, int id)
+void multiClientCmdTransfer(App* app, Client* client)
 {
-    Client* c;
+    char data[256];
     LedgerEntryHeader header;
-    const void* data;
 
-    c = &app->clients[id];
-    data = clientRead(app, id, sizeof(header));
-    if (!data)
+    if (!client->valid)
         return;
-    memcpy(&header, data, sizeof(header));
+
+    if (multiClientPeek(app, client, &header, sizeof(header)))
+        return;
+
     if (header.size > 128)
     {
-        fprintf(stderr, "Client #%d: Invalid transfer size %d\n", id, header.size);
-        multiClientRemove(app, id);
+        fprintf(stderr, "Client #%d: Invalid transfer size %d\n", client->id, header.size);
+        multiClientRemove(app, client);
         return;
     }
-    data = clientRead(app, id, sizeof(header) + header.size);
-    if (!data)
+
+    if (multiClientRead(app, client, data, sizeof(header) + header.size))
         return;
-    c->inBufSize = 0;
-    fprintf(stderr, "Client #%d: Transfer %d bytes\n", id, header.size);
-    multiLedgerWrite(app, c->ledgerId, data);
+
+    fprintf(stderr, "Client #%d: Transfer %d bytes\n", client->id, header.size);
+    multiLedgerWrite(app, client->ledgerId, data);
 
     /* Set the op to NOP */
-    c->op = OP_NONE;
+    client->op = OP_NONE;
 
     /* Notify all clients sharing the same ledger */
     for (int i = 0; i < app->clientSize; ++i)
     {
-        if (app->clients[i].socket == -1)
+        if (!app->clients[i].valid)
             continue;
-        if (app->clients[i].ledgerId != c->ledgerId)
+        if (app->clients[i].ledgerId != client->ledgerId)
             continue;
-        multiClientNotify(app, i);
+        multiClientTransferLedger(app, &app->clients[i]);
     }
 }
 
-static void clientInputReady(App* app, int id)
+void multiClientCmdMsg(App* app, Client* client)
 {
-    Client* c;
-    const void* data;
+    Client* other;
+    uint8_t size;
+    char    data[36];
 
-    c = &app->clients[id];
-
-    /* Read the operation */
-    while (c->op == OP_NONE)
-    {
-        data = clientRead(app, id, 1);
-        if (!data)
-            return;
-        c->op = *(const uint8_t*)data;
-        c->inBufSize = 0;
-    }
-
-    /* Trigger the operation */
-    switch (c->op)
-    {
-    case OP_TRANSFER:
-        clientInputTransfer(app, id);
-        break;
-    default:
-        fprintf(stderr, "Client #%d: Invalid operation %d\n", id, c->op);
-        multiClientRemove(app, id);
+    if (!client->valid)
         return;
-    }
-}
-
-void multiClientInput(App* app, int id)
-{
-    app->clients[id].timeout = 0;
-
-    switch (app->clients[id].state)
+    if (multiClientPeek(app, client, &size, 1))
+        return;
+    if ((size > 32) || !size)
     {
-    case CL_STATE_NEW:
-        clientInputNew(app, id);
-        break;
-    case CL_STATE_CONNECTED:
-        clientInputConnected(app, id);
-        break;
-    case CL_STATE_READY:
-        clientInputReady(app, id);
-        break;
-    }
-}
-
-static void setClientOutputTrack(App* app, int id, int track)
-{
-    struct epoll_event ev;
-
-    ev.events = EPOLLIN;
-    if (track)
-        ev.events |= EPOLLOUT;
-    ev.data.u32 = APP_EP_SOCK_CLIENT | id;
-    epoll_ctl(app->epoll, EPOLL_CTL_MOD, app->clients[id].socket, &ev);
-}
-
-static void clientTransfer(App* app, int clientId)
-{
-    Client* c;
-    Ledger* l;
-    LedgerEntryHeader* h;
-    uint32_t off;
-    int size;
-
-    c = &app->clients[clientId];
-    l = &app->ledgers[c->ledgerId];
-
-    if (l->count <= c->ledgerBase)
-    {
-        setClientOutputTrack(app, clientId, 0);
+        fprintf(stderr, "Client #%d: Invalid message size %d\n", client->id, size);
+        multiClientRemove(app, client);
         return;
     }
 
-    /* Prepare the payload */
-    off = l->index[c->ledgerBase];
-    c->outBuf[0] = OP_TRANSFER;
-    h = (LedgerEntryHeader*)(c->outBuf + 1);
-    multiFilePread(l->fileData, h, off, sizeof(*h));
-    multiFilePread(l->fileData, c->outBuf + 1 + sizeof(*h), off + sizeof(*h), h->size);
-    size = 1 + sizeof(*h) + h->size;
-    c->outBufSize = size;
-    c->outBufPos = 0;
-    c->ledgerBase++;
-
-    /* Trigger some output */
-    multiClientOutput(app, clientId);
-}
-
-void multiClientNotify(App* app, int id)
-{
-    Client* c;
-
-    /* Get client and check preconds */
-    c = &app->clients[id];
-    if (c->socket == -1)
+    /* Make the message */
+    if (multiClientRead(app, client, data + 3, size + 1))
         return;
-    if (c->state != CL_STATE_READY)
-        return;
-    if (c->outBufSize)
-        return;
+    data[0] = OP_MSG;
+    data[1] = (char)size;
+    memcpy(data + 2, &client->id, 2);
 
-    /* We need to send at least one entry */
-    clientTransfer(app, id);
-}
+    /* Set the op to NOP */
+    client->op = OP_NONE;
 
-void multiClientOutput(App* app, int id)
-{
-    Client* c;
-    int ret;
-
-    c = &app->clients[id];
-
-    /* Send the output */
-    while (c->outBufPos < c->outBufSize)
+    /* Broadcast */
+    for (int i = 0; i < app->clientSize; ++i)
     {
-        ret = send(c->socket, c->outBuf + c->outBufPos, c->outBufSize - c->outBufPos, 0);
-        if (ret <= 0)
+        if (i == client->id)
+            continue;
+        other = &app->clients[i];
+        if (!other->valid)
+            continue;
+        if (other->state != CL_STATE_READY)
+            continue;
+        if (other->ledgerId != client->ledgerId)
+            continue;
+        multiClientWrite(app, other, data, size + 4);
+    }
+}
+
+/* TODO: Use a ring buffer instead */
+static void* bufferReserve(NetworkBuffer* buf, uint32_t size)
+{
+    uint32_t newCapacity;
+    char* newData;
+
+    /* First size check - move the stored data to the front */
+    if (buf->size + size > buf->capacity && buf->pos)
+    {
+        memmove(buf->data, buf->data + buf->pos, buf->size - buf->pos);
+        buf->size -= buf->pos;
+        buf->pos = 0;
+    }
+
+    /* Check for space */
+    if (buf->size + size > buf->capacity)
+    {
+        /* Compute the new capacity */
+        do
         {
-            setClientOutputTrack(app, id, 1);
-            return;
+            newCapacity = buf->capacity * 2;
+            if (newCapacity > BUFFER_SIZE)
+                newCapacity = BUFFER_SIZE;
+
+            /* If a max size buffer still doesn't fit, abort */
+            if (newCapacity == buf->capacity)
+                return NULL;
         }
-        c->outBufPos += ret;
+        while (buf->size + size > newCapacity);
+
+        /* Realloc */
+        newData = realloc(buf->data, newCapacity);
+        if (!newData)
+            return NULL;
+        buf->data = newData;
+        buf->capacity = newCapacity;
     }
 
-    /* We have sent the output */
-    c->outBufSize = 0;
-    c->outBufPos = 0;
+    /* We know we have enough space */
+    return buf->data + buf->size;
+}
 
-    /* Trigger more output */
-    clientTransfer(app, id);
+/**
+ * Called periodically to handle timeouts.
+ */
+void multiClientEventTimer(App* app, Client* client)
+{
+    char nop;
+
+    if (!client->valid)
+        return;
+
+    /* Handle tx - send NOPs if we haven't sent anything in a while */
+    client->txTimeout++;
+    if (client->state == CL_STATE_READY && client->txTimeout > 3)
+    {
+        nop = OP_NONE;
+        multiClientWrite(app, client, &nop, 1);
+    }
+
+    /* Handle rx */
+    client->rxTimeout++;
+    if (client->rxTimeout > 30)
+    {
+        fprintf(stderr, "Client #%d: Timeout\n", client->id);
+        //multiClientRemove(app, client - app->clients);
+    }
+}
+
+/**
+ * Called every time a client is ready to send.
+ */
+void multiClientEventOutput(App* app, Client* client)
+{
+    if (!client->valid)
+        return;
+
+    /* First we need to flush the buffer */
+    multiClientFlushOut(app, client);
+
+    /* A ledger send might have been interrupted, resume if required */
+    multiClientTransferLedger(app, client);
+}
+
+void multiClientTransferLedger(App* app, Client* client)
+{
+    Ledger* ledger;
+    LedgerEntryHeader* header;
+    uint32_t off;
+    uint32_t size;
+    char buffer[512];
+
+    if (!client->valid)
+        return;
+    if (client->state != CL_STATE_READY)
+        return;
+
+    ledger = &app->ledgers[client->ledgerId];
+    for (;;)
+    {
+        /* Check if we're at the end of the ledger */
+        if (ledger->count <= client->ledgerBase)
+            return;
+
+        /* Prepare the payload */
+        off = ledger->index[client->ledgerBase];
+        buffer[0] = OP_TRANSFER;
+        header = (LedgerEntryHeader*)(buffer + 1);
+        multiFilePread(ledger->fileData, header, off, sizeof(*header));
+        multiFilePread(ledger->fileData, buffer + 1 + sizeof(*header), off + sizeof(*header), header->size);
+        size = 1 + sizeof(*header) + header->size;
+
+        /* Send the entry */
+        if (multiClientWrite(app, client, buffer, size))
+            return;
+
+        /* Entry is either sent or in the tx queue - either way, we're past it */
+        client->ledgerBase++;
+    }
+}
+
+int multiClientPeek(App* app, Client* client, void* dst, uint32_t size)
+{
+    if (!client->valid)
+        return -1;
+
+    /* Do we need to read? */
+    if (client->rx.size - client->rx.pos < size)
+    {
+        /* Read */
+        if (multiClientFlushIn(app, client))
+            return -1;
+
+        /* Check again */
+        if (client->rx.size - client->rx.pos < size)
+            return -1;
+    }
+
+    if (dst)
+        memcpy(dst, client->rx.data + client->rx.pos, size);
+    return 0;
+}
+
+int multiClientRead(App* app, Client* client, void* dst, uint32_t size)
+{
+    if (multiClientPeek(app, client, dst, size))
+        return -1;
+    client->rx.pos += size;
+    if (client->rx.pos == client->rx.size)
+    {
+        client->rx.pos = 0;
+        client->rx.size = 0;
+    }
+    return 0;
+}
+
+/**
+ * Send buffered data to the client.
+ * @param client The client
+ * @param data The data to send
+ * @param size The size of the data
+ * @return 0 on success, -1 on error
+ */
+int multiClientWrite(App* app, Client* client, const void* data, uint32_t size)
+{
+    void* dst;
+
+    /* Check for errored client */
+    if (!client->valid)
+        return -1;
+
+    /* Allocate */
+    dst = bufferReserve(&client->tx, size);
+    if (!dst)
+        return -1;
+
+    /* Copy */
+    memcpy(dst, data, size);
+    client->tx.size += size;
+
+    /* Reset the tx timeout */
+    client->txTimeout = 0;
+
+    /* Trigger output */
+    return multiClientFlushOut(app, client);
+}
+
+/**
+ * Flush buffered data from the client.
+ * @param client The client
+ * @return 0 on success, -1 on error
+ */
+int multiClientFlushIn(App* app, Client* client)
+{
+    ssize_t ret;
+    void* newData;
+    uint32_t newCapacity;
+
+    (void)app;
+
+    if (!client->valid)
+        return -1;
+
+    for (;;)
+    {
+        if (client->rx.size == client->rx.capacity)
+        {
+            /* The buffer is full - expand if possible */
+            if (client->rx.pos)
+            {
+                /* Expand by relocating */
+                memmove(client->rx.data, client->rx.data + client->rx.pos, client->rx.size - client->rx.pos);
+                client->rx.size -= client->rx.pos;
+                client->rx.pos = 0;
+            }
+            else
+            {
+                /* Expand by realloc */
+                newCapacity = client->rx.capacity * 2;
+                if (newCapacity > BUFFER_SIZE)
+                    newCapacity = BUFFER_SIZE;
+                if (newCapacity == client->rx.capacity)
+                {
+                    /* Buffer is saturated */
+                    return 0;
+                }
+
+                newData = realloc(client->rx.data, newCapacity);
+                if (!newData)
+                {
+                    /* Out of memory, but not a read error */
+                    return 0;
+                }
+                client->rx.data = newData;
+                client->rx.capacity = newCapacity;
+            }
+        }
+
+        ret = recv(client->socket, client->rx.data + client->rx.size, client->rx.capacity - client->rx.size, 0);
+        if (ret == 0)
+        {
+            /* Sane disconnect */
+            multiClientDisconnect(app, client);
+            return -1;
+        }
+        else if (ret > 0)
+        {
+            client->rx.size += ret;
+        }
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                client->rxTimeout = 0;
+                return 0;
+            }
+            fprintf(stderr, "Client #%d: Read error %d\n", client->id, errno);
+            multiClientRemove(app, client);
+            return -1;
+        }
+    }
+}
+
+/**
+ * Flush buffered data to the client.
+ * @param client The client
+ * @return 0 on success, -1 on error
+ */
+int multiClientFlushOut(App* app, Client* client)
+{
+    ssize_t ret;
+
+    (void)app;
+
+    if (!client->valid)
+        return -1;
+
+    for (;;)
+    {
+        /* Check for empty tx buffer */
+        if (client->tx.pos == client->tx.size)
+        {
+            client->tx.pos = 0;
+            client->tx.size = 0;
+            return 0;
+        }
+
+        /* Send */
+        ret = send(client->socket, client->tx.data + client->tx.pos, client->tx.size - client->tx.pos, 0);
+        if (ret >= 0)
+        {
+            client->tx.pos += ret;
+        }
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return 0;
+            fprintf(stderr, "Client #%d: Write error %d\n", client->id, errno);
+            multiClientRemove(app, client);
+            return -1;
+        }
+    }
 }

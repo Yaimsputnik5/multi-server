@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define VERSION 0x00000200
+
 #define APP_EP_SOCK_SERVER  0x00000000
 #define APP_EP_SOCK_CLIENT  0x01000000
 #define APP_EP_TIMER        0x02000000
@@ -26,8 +28,10 @@
 
 #define OP_NONE             0
 #define OP_TRANSFER         1
+#define OP_MSG              2
 
 #define PACKED __attribute__((packed))
+#define BUFFER_SIZE 16384
 
 typedef struct
 {
@@ -51,19 +55,32 @@ LedgerEntryHeader;
 
 typedef struct
 {
-    int         socket;
-    int         state;
-    int         timeout;
+    char*       data;
+    uint32_t    size;
+    uint32_t    capacity;
+    uint32_t    pos;
+}
+NetworkBuffer;
+
+typedef struct
+{
+    int  id;
+    int  valid;
+    int  socket;
+    int  state;
+
+    uint32_t    version;
+
     int         ledgerId;
     uint32_t    ledgerBase;
 
     uint8_t     op;
-    char        inBuf[256];
-    uint32_t    inBufSize;
 
-    char        outBuf[256];
-    uint32_t    outBufSize;
-    uint32_t    outBufPos;
+    NetworkBuffer rx;
+    NetworkBuffer tx;
+
+    int rxTimeout;
+    int txTimeout;
 }
 Client;
 
@@ -88,16 +105,17 @@ typedef struct
     int         epoll;
     int         socket;
     int         timer;
+    int         error;
     const char* dataDir;
 
     /* Clients */
-    uint32_t clientSize;
-    uint32_t clientCapacity;
+    int     clientSize;
+    int     clientCapacity;
     Client* clients;
 
     /* Ledgers */
-    uint32_t ledgerSize;
-    uint32_t ledgerCapacity;
+    int     ledgerSize;
+    int     ledgerCapacity;
     Ledger* ledgers;
 }
 App;
@@ -107,17 +125,31 @@ int multiQuit(App* app);
 int multiListen(App* app, const char* host, uint16_t port);
 int multiRun(App* app);
 
-void multiClientNew(App* app, int s);
-void multiClientDisconnect(App* app, int id);
-void multiClientRemove(App* app, int id);
-void multiClientInput(App* app, int id);
-void multiClientNotify(App* app, int id);
-void multiClientOutput(App* app, int id);
-
 int  multiLedgerOpen(App* app, const char* uuid);
 void multiLedgerWrite(App* app, int ledgerId, const void* data);
 void multiLedgerClose(App* app, int ledgerId);
 
 void multiFilePread(int fd, void* dst, uint32_t off, uint32_t size);
+
+/* Client */
+Client*     multiClientNew(App* app, int socket);
+void        multiClientRemove(App* app, Client* client);
+void        multiClientDisconnect(App* app, Client* client);
+void        multiClientProcess(App* app, Client* client);
+void        multiClientProcessNew(App* app, Client* client);
+void        multiClientProcessConnected(App* app, Client* client);
+void        multiClientProcessReady(App* app, Client* client);
+void        multiClientCmdTransfer(App* app, Client* client);
+void        multiClientCmdMsg(App* app, Client* client);
+void        multiClientEventTimer(App* app, Client* client);
+void        multiClientEventInput(App* app, Client* client);
+void        multiClientEventOutput(App* app, Client* client);
+void        multiClientTransferLedger(App* app, Client* client);
+int         multiClientPeek(App* app, Client* client, void* dst, uint32_t size);
+int         multiClientRead(App* app, Client* client, void* dst, uint32_t size);
+int         multiClientWrite(App* app, Client* client, const void* data, uint32_t size);
+int         multiClientFlushIn(App* app, Client* client);
+int         multiClientFlushOut(App* app, Client* client);
+
 
 #endif

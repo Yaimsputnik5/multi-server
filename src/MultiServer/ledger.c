@@ -51,7 +51,7 @@ static void makeLedger(App* app, const char* uuid, int id)
 {
     Ledger* l;
     const uint8_t* u;
-    char buf[512];
+    char buf[520];
     char bufBase[512];
 
     l = app->ledgers + id;
@@ -66,11 +66,11 @@ static void makeLedger(App* app, const char* uuid, int id)
     hashset64Init(&l->keysSet);
 
     /* Open ledger files */
-    snprintf(bufBase, 512, "%s/ledgers/%02x", app->dataDir, u[0]);
+    snprintf(bufBase, sizeof(bufBase), "%s/ledgers/%02x", app->dataDir, u[0]);
     mkdir(bufBase, 0755);
-    snprintf(bufBase, 512, "%s/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", app->dataDir, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
+    snprintf(bufBase, sizeof(bufBase), "%s/ledgers/%02x/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", app->dataDir, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
     mkdir(bufBase, 0755);
-    snprintf(buf, 512, "%s/data", bufBase);
+    snprintf(buf, sizeof(buf), "%s/data", bufBase);
     l->fileData = open(buf, O_APPEND | O_RDWR | O_CREAT, 0644);
     l->count = 0;
     l->size = 0;
@@ -150,11 +150,11 @@ void multiLedgerClose(App* app, int id)
     for (int i = 0; i < app->clientSize; ++i)
     {
         c = app->clients + i;
-        if (c->socket == -1)
+        if (!c->valid)
             continue;
         if (c->ledgerId != id)
             continue;
-        multiClientDisconnect(app, i);
+        multiClientDisconnect(app, c);
     }
 }
 
@@ -163,7 +163,6 @@ static const char kZero[16] = { 0 };
 static int fileWrite(int fd, const void* data, int size)
 {
     int ret;
-    int acc;
 
     while (size)
     {
