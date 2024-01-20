@@ -252,6 +252,9 @@ void multiClientProcessReady(App* app, Client* client)
         case OP_TRANSFER:
             multiClientCmdTransfer(app, client);
             break;
+        case OP_MSG:
+            multiClientCmdMsg(app, client);
+            return;
         default:
             fprintf(stderr, "Client #%d: Invalid operation %d\n", client->id, client->op);
             multiClientRemove(app, client);
@@ -295,6 +298,49 @@ void multiClientCmdTransfer(App* app, Client* client)
         if (app->clients[i].ledgerId != client->ledgerId)
             continue;
         multiClientTransferLedger(app, &app->clients[i]);
+    }
+}
+
+void multiClientCmdMsg(App* app, Client* client)
+{
+    Client* other;
+    uint8_t size;
+    char    data[36];
+
+    if (!client->valid)
+        return;
+    if (multiClientPeek(app, client, &size, 1))
+        return;
+    if ((size > 32) || !size)
+    {
+        fprintf(stderr, "Client #%d: Invalid message size %d\n", client->id, size);
+        multiClientRemove(app, client);
+        return;
+    }
+
+    /* Make the message */
+    if (multiClientRead(app, client, data + 4, size))
+        return;
+    data[0] = OP_MSG;
+    data[1] = (char)size;
+    memcpy(data + 2, &client->id, 2);
+
+    /* Set the op to NOP */
+    client->op = OP_NONE;
+
+    /* Broadcast */
+    for (int i = 0; i < app->clientSize; ++i)
+    {
+        if (i == client->id)
+            continue;
+        other = &app->clients[i];
+        if (!other->valid)
+            continue;
+        if (other->state != CL_STATE_READY)
+            continue;
+        if (other->ledgerId != client->ledgerId)
+            continue;
+        multiClientWrite(app, other, data, size + 4);
     }
 }
 

@@ -28,6 +28,7 @@
 
 #define OP_NONE             0
 #define OP_TRANSFER         1
+#define OP_MSG              2
 
 #define PACKED __attribute__((packed))
 #define BUFFER_SIZE 16384
@@ -139,6 +140,7 @@ void        multiClientProcessNew(App* app, Client* client);
 void        multiClientProcessConnected(App* app, Client* client);
 void        multiClientProcessReady(App* app, Client* client);
 void        multiClientCmdTransfer(App* app, Client* client);
+void        multiClientCmdMsg(App* app, Client* client);
 void        multiClientEventTimer(App* app, Client* client);
 void        multiClientEventInput(App* app, Client* client);
 void        multiClientEventOutput(App* app, Client* client);
