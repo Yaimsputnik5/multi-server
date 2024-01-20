@@ -31,6 +31,7 @@ void multiClientNew(App* app, int sock)
     client->socket = sock;
     client->state = CL_STATE_NEW;
     client->timeout = 0;
+    client->version = 0;
     client->ledgerId = -1;
     client->op = 0;
     client->inBufSize = 0;
@@ -71,7 +72,7 @@ void multiClientRemove(App* app, int id)
     }
 }
 
-static const void* clientRead(App* app, int id, int size)
+static const void* clientRead(App* app, int id, uint32_t size)
 {
     Client* c;
     int ret;
@@ -132,24 +133,44 @@ static void clientInputNew(App* app, int id)
 {
     Client* c;
     const void* data;
+    uint32_t version;
 
     c = &app->clients[id];
     data = clientRead(app, id, 5);
     if (!data)
         return;
-    c->inBufSize = 0;
 
-    /* We have read the data */
-    if (memcmp(data, "OoTMM", 5))
+    if (memcmp(data, "OOMM2", 5) == 0)
+    {
+        /* New header */
+        data = clientRead(app, id, 9);
+        if (!data)
+            return;
+        memcpy(&version, (const char*)data + 5, 4);
+
+    }
+    else if (memcmp(data, "OoTMM", 5) == 0)
+    {
+        /* Old header */
+        version = 0;
+    }
+    else
     {
         fprintf(stderr, "Client #%d: Invalid header\n", id);
         multiClientRemove(app, id);
         return;
     }
 
+    /* Discard */
+    c->inBufSize = 0;
+    c->version = version;
+
     /* Reply */
     /* This is the first message, so we assume the send will succeed */
-    send(c->socket, "OoTMM", 5, 0);
+    if (version)
+        send(c->socket, "OOMM2", 5, 0);
+    else
+        send(c->socket, "OoTMM", 5, 0);
 
     /* Log */
     fprintf(stderr, "Client #%d: Valid header\n", id);

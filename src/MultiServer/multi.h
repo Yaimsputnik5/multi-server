@@ -54,6 +54,8 @@ typedef struct
     int         socket;
     int         state;
     int         timeout;
+    uint32_t    version;
+
     int         ledgerId;
     uint32_t    ledgerBase;
 
@@ -91,13 +93,13 @@ typedef struct
     const char* dataDir;
 
     /* Clients */
-    uint32_t clientSize;
-    uint32_t clientCapacity;
+    int     clientSize;
+    int     clientCapacity;
     Client* clients;
 
     /* Ledgers */
-    uint32_t ledgerSize;
-    uint32_t ledgerCapacity;
+    int     ledgerSize;
+    int     ledgerCapacity;
     Ledger* ledgers;
 }
 App;
