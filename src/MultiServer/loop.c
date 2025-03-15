@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <sys/timerfd.h>
+#include <netinet/tcp.h>
 #include <time.h>
 #include "multi.h"
 
@@ -15,6 +16,7 @@ static void signalHandler(int signum)
 static void handleNewClients(App* app)
 {
     int s;
+    int one;
 
     for (;;)
     {
@@ -22,6 +24,10 @@ static void handleNewClients(App* app)
         s = accept(app->socket, NULL, NULL);
         if (s < 0)
             break;
+
+        /* Set TCP_NODELAY */
+        one = 1;
+        setsockopt(s, SOL_TCP, TCP_NODELAY, &one, sizeof(one));
 
         /* Make the socket non-blocking */
         fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK);

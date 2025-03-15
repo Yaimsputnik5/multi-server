@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <netinet/tcp.h>
 #include "multi.h"
 
 int multiInit(App* app, const char* dataDir)
@@ -101,6 +102,10 @@ int multiListen(App* app, const char* host, uint16_t port)
             s = -1;
             continue;
         }
+
+        /* Set TCP_NODELAY */
+        ret = 1;
+        setsockopt(s, SOL_TCP, TCP_NODELAY, &ret, sizeof(ret));
 
         /* Bind the socket */
         ret = bind(s, ptr->ai_addr, ptr->ai_addrlen);
