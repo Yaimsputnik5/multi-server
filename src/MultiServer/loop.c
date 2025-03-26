@@ -106,7 +106,7 @@ int multiRun(App* app)
 {
     int eventCount;
     int ret;
-    struct epoll_event events[16];
+    struct epoll_event events[256];
 
     /* Setup */
     runSetup(app);
@@ -115,7 +115,7 @@ int multiRun(App* app)
     for (;;)
     {
         //printf("WAIT\n");
-        eventCount = epoll_wait(app->epoll, events, 16, -1);
+        eventCount = epoll_wait(app->epoll, events, 256, -1);
         //printf("WAIT END %d\n", eventCount);
         if (sSignaled)
             break;
