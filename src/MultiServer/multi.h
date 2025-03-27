@@ -140,7 +140,7 @@ void        multiClientProcessNew(App* app, Client* client);
 void        multiClientProcessConnected(App* app, Client* client);
 void        multiClientProcessReady(App* app, Client* client);
 void        multiClientCmdTransfer(App* app, Client* client);
-void        multiClientCmdMsg(App* app, Client* client);
+int         multiClientCmdMsg(App* app, Client* client);
 void        multiClientEventTimer(App* app, Client* client);
 void        multiClientEventInput(App* app, Client* client);
 void        multiClientEventOutput(App* app, Client* client);
