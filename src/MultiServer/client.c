@@ -254,7 +254,7 @@ void multiClientProcessReady(App* app, Client* client)
             break;
         case OP_MSG:
             multiClientCmdMsg(app, client);
-            break;
+            return;
         default:
             fprintf(stderr, "Client #%d: Invalid operation %d\n", client->id, client->op);
             multiClientRemove(app, client);
