@@ -253,8 +253,9 @@ void multiClientProcessReady(App* app, Client* client)
             multiClientCmdTransfer(app, client);
             break;
         case OP_MSG:
-            multiClientCmdMsg(app, client);
-            return;
+            if (!multiClientCmdMsg(app, client))
+                return;
+            break;
         default:
             fprintf(stderr, "Client #%d: Invalid operation %d\n", client->id, client->op);
             multiClientRemove(app, client);
@@ -301,16 +302,16 @@ void multiClientCmdTransfer(App* app, Client* client)
     }
 }
 
-void multiClientCmdMsg(App* app, Client* client)
+int multiClientCmdMsg(App* app, Client* client)
 {
     Client* other;
     uint8_t size;
     char    data[36];
 
     if (!client->valid)
-        return;
+        return 0;
     if (multiClientPeek(app, client, &size, 1))
-        return;
+        return 0;
     if ((size > 32) || !size)
     {
         fprintf(stderr, "Client #%d: Invalid message size %d\n", client->id, size);
@@ -320,7 +321,7 @@ void multiClientCmdMsg(App* app, Client* client)
 
     /* Make the message */
     if (multiClientRead(app, client, data + 3, size + 1))
-        return;
+        return 0;
     data[0] = OP_MSG;
     data[1] = (char)size;
     memcpy(data + 2, &client->id, 2);
@@ -342,6 +343,8 @@ void multiClientCmdMsg(App* app, Client* client)
             continue;
         multiClientWrite(app, other, data, size + 4);
     }
+
+    return 1;
 }
 
 /* TODO: Use a ring buffer instead */
