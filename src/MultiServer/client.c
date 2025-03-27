@@ -316,7 +316,7 @@ int multiClientCmdMsg(App* app, Client* client)
     {
         fprintf(stderr, "Client #%d: Invalid message size %d\n", client->id, size);
         multiClientRemove(app, client);
-        return;
+        return 0;
     }
 
     /* Make the message */
